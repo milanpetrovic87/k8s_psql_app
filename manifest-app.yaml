@@ -1,0 +1,140 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-credentials
+type: Opaque
+data:
+  user: SW5zYWpkZXI4NyE=
+  password: VGFqbmFTaWZyYTEh
+  database: VHJlem9yMjE=
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: task-pv-volume
+  labels:
+    type: local
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/mnt/postgres-pv-local"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: task-pv-claim
+spec:
+  storageClassName: manual
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 3Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-for-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: postgres-for-app
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        name: postgres-for-app
+    spec:
+      containers:
+        - env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: database
+
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: user
+
+          image: postgres:latest
+          name: postgres-for-app
+          ports:
+            - containerPort: 5432
+          resources: {}
+          volumeMounts:
+            - mountPath: "/var/lib/postgresql/data"
+              name: task-pv-volume
+      restartPolicy: Always
+      volumes:
+        - name: task-pv-volume
+          persistentVolumeClaim:
+            claimName: task-pv-claim
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  labels:
+    app: my-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+      - name: my-app
+        image: postgres:14.4-alpine
+        command: ["/bin/sh","-c", "sleep 365d"]
+        env:
+        - name: PSQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: user
+        - name: PSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: password
+        - name: PSQL_DB
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: database
+---
+apiVersion: v1
+kind: Service
+metadata:
+  creationTimestamp: null
+  name: postgres-server
+spec:
+  ports:
+  - port: 5493
+    protocol: TCP
+    targetPort: 5432
+  selector:
+    name: postgres-for-app
+  type: ClusterIP
+status:
+  loadBalancer: {}
+
